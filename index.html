@@ -67,6 +67,9 @@ function buildParticles() {
       size: onRing ? Math.random() * 2 + 1 : Math.random() * 3 + 1,
       twinkle: Math.random() * Math.PI * 2,
       twinkleSpeed: Math.random() * 0.05 + 0.02,
+      flickerPhase: Math.random() * Math.PI * 2,
+      flickerSpeed: 0.5 + Math.random() * 1.1,
+      flickerThresh: -0.3 + Math.random() * 0.6,
       zOff: (Math.random() - 0.5) * 0.6,
       label: Math.random() < 0.15 ? (Math.floor(Math.random() * 9000) + 1000) : null,
       isTrailDust: Math.random() < 0.035 // only a handful of particles leave a trail
@@ -85,11 +88,17 @@ for (let i = 0; i <= GUIDE_STEPS; i++) {
   guidePoints.push({ angle: a });
 }
 
-// independent fast 3D tumble per ring (x/y/z axes) — this replaces the old flat 2D spin
+// independent fast 3D tumble per ring — dominant spin on one axis (the
+// coin-flip / edge-on look from the reference video), slight wobble on the others
 let rotA = { x: 0, y: 0, z: 0 };
 let rotB = { x: 0.9, y: 2.1, z: 1.4 }; // offset start so they don't overlap perfectly
-const SPEED_A = { x: 0.075, y: 0.10, z: 0.055 };
-const SPEED_B = { x: 0.10, y: 0.06, z: 0.085 };
+const SPEED_A = { x: 0.045, y: 0.24, z: 0.02 };
+const SPEED_B = { x: 0.02, y: 0.21, z: 0.05 };
+
+// each ring flickers as a whole — vanishing and reappearing — on its own
+// randomized timer so the two rings are never in sync (something stays on screen)
+let flickerA = { phase: Math.random() * Math.PI * 2, speed: 0.9 + Math.random() * 0.3, thresh: -0.2 };
+let flickerB = { phase: Math.random() * Math.PI * 2 + 3, speed: 0.9 + Math.random() * 0.3, thresh: -0.2 };
 
 // ---------------- Size state ----------------
 const SMALL_PX = 16;   // tiny, sitting on the fingertip
@@ -200,9 +209,15 @@ function draw() {
   rotA.x += SPEED_A.x; rotA.y += SPEED_A.y; rotA.z += SPEED_A.z;
   rotB.x += SPEED_B.x; rotB.y += SPEED_B.y; rotB.z += SPEED_B.z;
 
+  // fast, independently-timed ring flicker — each ring pops in and out on its own clock
+  flickerA.phase += flickerA.speed;
+  flickerB.phase += flickerB.speed;
+  const ringAVisible = Math.sin(flickerA.phase) > flickerA.thresh;
+  const ringBVisible = Math.sin(flickerB.phase) > flickerB.thresh;
+
   if (holding) {
-    drawRing(particlesA, rotA);
-    drawRing(particlesB, rotB);
+    drawRing(particlesA, rotA, ringAVisible);
+    drawRing(particlesB, rotB, ringBVisible);
   }
 
   // trail glow goes down first, crisp ring particles get drawn on top of it
@@ -212,8 +227,8 @@ function draw() {
   ctx.restore();
 
   if (holding) {
-    drawRingCrisp(particlesA, rotA);
-    drawRingCrisp(particlesB, rotB);
+    drawRingCrisp(particlesA, rotA, ringAVisible);
+    drawRingCrisp(particlesB, rotB, ringBVisible);
     drawNucleus();
   }
 
@@ -284,8 +299,9 @@ function project3D(x, y, z, rot, cx, cy, scale, focal) {
   return { x: cx + px * persp, y: cy + py * persp, persp };
 }
 
-function drawRing(particles, rot) {
+function drawRing(particles, rot, ringVisible) {
   // trail pass: only the particles flagged isTrailDust get drawn here, onto trailCtx
+  if (!ringVisible) return;
   const cx = ringPos.x * canvasElement.width, cy = ringPos.y * canvasElement.height;
   const focal = 500;
   const R = currentSizePx;
@@ -296,6 +312,7 @@ function drawRing(particles, rot) {
 
   for (const p of particles) {
     if (!p.isTrailDust) continue;
+    if (Math.sin(p.flickerPhase) <= p.flickerThresh) continue; // this particle is in its "off" beat
     const rad = p.rJitter;
     const ex = Math.cos(p.angle) * rad;
     const ey = Math.sin(p.angle) * rad * ringTiltX;
@@ -328,8 +345,14 @@ function drawRing(particles, rot) {
   trailCtx.restore();
 }
 
-function drawRingCrisp(particles, rot) {
+function drawRingCrisp(particles, rot, ringVisible) {
   // crisp pass: guide outline + every particle, drawn fresh each frame (no trail)
+  if (!ringVisible) {
+    // still advance each particle's flicker/twinkle clocks even while the
+    // whole ring is in its "off" beat, so timing stays continuous
+    for (const p of particles) { p.twinkle += p.twinkleSpeed; p.flickerPhase += p.flickerSpeed; }
+    return;
+  }
   const cx = ringPos.x * canvasElement.width, cy = ringPos.y * canvasElement.height;
   const focal = 500;
   const R = currentSizePx;
@@ -352,6 +375,8 @@ function drawRingCrisp(particles, rot) {
 
   for (const p of particles) {
     p.twinkle += p.twinkleSpeed;
+    p.flickerPhase += p.flickerSpeed;
+    if (Math.sin(p.flickerPhase) <= p.flickerThresh) continue; // this particle vanishes for this beat
     const rad = p.rJitter;
     const ex = Math.cos(p.angle) * rad;
     const ey = Math.sin(p.angle) * rad * ringTiltX;
