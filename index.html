@@ -55,7 +55,7 @@ resize();
 
 // ---------- Particle field (SAME look as the original: ring + halo dust + number tags) ----------
 // Built twice now — two independent rings tumbling fast in 3D, like the atom/nucleus reference.
-const NUM_PARTICLES = 260; // per ring (halved from 450 since there are now two rings)
+const NUM_PARTICLES = 210; // per ring (trimmed down slightly for a less dense field)
 
 function buildParticles() {
   const particles = [];
@@ -426,8 +426,8 @@ function drawRingCrisp(particles, rot, ringVisible, activeHalf) {
     ctx.fill();
 
     if (p.label) {
-      ctx.font = '9px monospace';
-      ctx.fillStyle = `rgba(255,255,255,${alpha * 0.5})`;
+      ctx.font = '11px monospace';
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(1, alpha + 0.35)})`;
       ctx.fillText('#' + p.label, pt.x + 6, pt.y - 4);
     }
   }
