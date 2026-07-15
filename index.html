@@ -36,11 +36,19 @@ const ctx = canvasElement.getContext('2d');
 const trailCanvas = document.createElement('canvas');
 const trailCtx = trailCanvas.getContext('2d');
 
+// offscreen, downsampled canvas used purely to build a real bloom (blurred
+// bright-pass) layer that gets screened back on top each frame
+const bloomCanvas = document.createElement('canvas');
+const bloomCtx = bloomCanvas.getContext('2d');
+const BLOOM_SCALE = 0.35;
+
 function resize(){
   canvasElement.width = window.innerWidth;
   canvasElement.height = window.innerHeight;
   trailCanvas.width = window.innerWidth;
   trailCanvas.height = window.innerHeight;
+  bloomCanvas.width = Math.max(1, Math.round(window.innerWidth * BLOOM_SCALE));
+  bloomCanvas.height = Math.max(1, Math.round(window.innerHeight * BLOOM_SCALE));
 }
 window.addEventListener('resize', resize);
 resize();
@@ -80,8 +88,8 @@ for (let i = 0; i <= GUIDE_STEPS; i++) {
 // independent fast 3D tumble per ring (x/y/z axes) — this replaces the old flat 2D spin
 let rotA = { x: 0, y: 0, z: 0 };
 let rotB = { x: 0.9, y: 2.1, z: 1.4 }; // offset start so they don't overlap perfectly
-const SPEED_A = { x: 0.22, y: 0.30, z: 0.16 };
-const SPEED_B = { x: 0.30, y: 0.18, z: 0.26 };
+const SPEED_A = { x: 0.075, y: 0.10, z: 0.055 };
+const SPEED_B = { x: 0.10, y: 0.06, z: 0.085 };
 
 // ---------------- Size state ----------------
 const SMALL_PX = 16;   // tiny, sitting on the fingertip
@@ -209,6 +217,22 @@ function draw() {
     drawNucleus();
   }
 
+  // ---- real bloom pass: grab the bright pixels just drawn, downsample +
+  // blur them, and screen that glow back on top. Downsampling is what makes
+  // a proper gaussian blur() cheap enough to run every frame. ----
+  if (holding) {
+    bloomCtx.clearRect(0, 0, bloomCanvas.width, bloomCanvas.height);
+    bloomCtx.drawImage(canvasElement, 0, 0, bloomCanvas.width, bloomCanvas.height);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.filter = 'blur(4px)';
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(bloomCanvas, 0, 0, bloomCanvas.width, bloomCanvas.height, 0, 0, w, h);
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   requestAnimationFrame(draw);
 }
 
@@ -278,7 +302,12 @@ function drawRing(particles, rot) {
     const ez = p.zOff * rad;
     const pt = project3D(ex, ey, ez, rot, cx, cy, R, focal);
 
-    const alpha = 0.5 + 0.5 * Math.sin(p.twinkle);
+    const rawAlpha = 0.5 + 0.5 * Math.sin(p.twinkle);
+    // ease toward the target alpha instead of snapping to it each frame —
+    // this is what was reading as flicker on the trailing dust
+    if (p.trailAlpha === undefined) p.trailAlpha = rawAlpha;
+    p.trailAlpha += (rawAlpha - p.trailAlpha) * 0.15;
+    const alpha = p.trailAlpha;
     const size = p.size * (0.7 + 0.6 * alpha) * pt.persp;
 
     const grad = trailCtx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, size * 4);
