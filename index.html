@@ -31,9 +31,16 @@ const videoElement = document.getElementById('video');
 const canvasElement = document.getElementById('output');
 const ctx = canvasElement.getContext('2d');
 
+// offscreen canvas just for the trailing dust particles — everything else
+// stays crisp/no-trail on the main canvas
+const trailCanvas = document.createElement('canvas');
+const trailCtx = trailCanvas.getContext('2d');
+
 function resize(){
   canvasElement.width = window.innerWidth;
   canvasElement.height = window.innerHeight;
+  trailCanvas.width = window.innerWidth;
+  trailCanvas.height = window.innerHeight;
 }
 window.addEventListener('resize', resize);
 resize();
@@ -53,7 +60,8 @@ function buildParticles() {
       twinkle: Math.random() * Math.PI * 2,
       twinkleSpeed: Math.random() * 0.05 + 0.02,
       zOff: (Math.random() - 0.5) * 0.6,
-      label: Math.random() < 0.15 ? (Math.floor(Math.random() * 9000) + 1000) : null
+      label: Math.random() < 0.15 ? (Math.floor(Math.random() * 9000) + 1000) : null,
+      isTrailDust: Math.random() < 0.035 // only a handful of particles leave a trail
     });
   }
   return particles;
@@ -152,12 +160,15 @@ function pickHoldingHand() {
 function draw() {
   const w = canvasElement.width, h = canvasElement.height;
 
-  // glow trail: erase a little alpha each frame instead of clearing,
-  // so the trail persists and the video underneath still shows through
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.fillStyle = 'rgba(0,0,0,0.14)';
-  ctx.fillRect(0, 0, w, h);
-  ctx.globalCompositeOperation = 'source-over';
+  // main canvas: fully clear every frame — the ring itself stays crisp, no trail
+  ctx.clearRect(0, 0, w, h);
+
+  // trail canvas: only fades a little each frame, so only the dust particles
+  // drawn onto it (not the whole ring) leave a glowing trail behind
+  trailCtx.globalCompositeOperation = 'destination-out';
+  trailCtx.fillStyle = 'rgba(0,0,0,0.08)';
+  trailCtx.fillRect(0, 0, w, h);
+  trailCtx.globalCompositeOperation = 'source-over';
 
   const { holding, other } = pickHoldingHand();
 
@@ -186,6 +197,17 @@ function draw() {
     drawRing(particlesB, rotB);
   }
 
+  // trail glow goes down first, crisp ring particles get drawn on top of it
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(trailCanvas, 0, 0);
+  ctx.restore();
+
+  if (holding) {
+    drawRingCrisp(particlesA, rotA);
+    drawRingCrisp(particlesB, rotB);
+  }
+
   requestAnimationFrame(draw);
 }
 
@@ -212,15 +234,54 @@ function project3D(x, y, z, rot, cx, cy, scale, focal) {
 }
 
 function drawRing(particles, rot) {
+  // trail pass: only the particles flagged isTrailDust get drawn here, onto trailCtx
   const cx = ringPos.x * canvasElement.width, cy = ringPos.y * canvasElement.height;
   const focal = 500;
   const R = currentSizePx;
-  const ringTiltX = 0.35; // keep the original ellipse squish baked into the ring's own z
+  const ringTiltX = 0.35;
+
+  trailCtx.save();
+  trailCtx.globalCompositeOperation = 'lighter';
+
+  for (const p of particles) {
+    if (!p.isTrailDust) continue;
+    const rad = p.rJitter;
+    const ex = Math.cos(p.angle) * rad;
+    const ey = Math.sin(p.angle) * rad * ringTiltX;
+    const ez = p.zOff * rad;
+    const pt = project3D(ex, ey, ez, rot, cx, cy, R, focal);
+
+    const alpha = 0.5 + 0.5 * Math.sin(p.twinkle);
+    const size = p.size * (0.7 + 0.6 * alpha) * pt.persp;
+
+    const grad = trailCtx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, size * 4);
+    grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    grad.addColorStop(0.4, `rgba(200,220,255,${alpha * 0.5})`);
+    grad.addColorStop(1, 'rgba(200,220,255,0)');
+    trailCtx.fillStyle = grad;
+    trailCtx.beginPath();
+    trailCtx.arc(pt.x, pt.y, size * 4, 0, Math.PI * 2);
+    trailCtx.fill();
+
+    trailCtx.fillStyle = `rgba(255,255,255,${alpha})`;
+    trailCtx.beginPath();
+    trailCtx.arc(pt.x, pt.y, size * 0.6, 0, Math.PI * 2);
+    trailCtx.fill();
+  }
+
+  trailCtx.restore();
+}
+
+function drawRingCrisp(particles, rot) {
+  // crisp pass: guide outline + every particle, drawn fresh each frame (no trail)
+  const cx = ringPos.x * canvasElement.width, cy = ringPos.y * canvasElement.height;
+  const focal = 500;
+  const R = currentSizePx;
+  const ringTiltX = 0.35;
 
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
 
-  // guide outline
   ctx.beginPath();
   ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = 1;
@@ -233,7 +294,6 @@ function drawRing(particles, rot) {
   }
   ctx.stroke();
 
-  // particles (same rendering as the original: soft glow + core dot + number tag)
   for (const p of particles) {
     p.twinkle += p.twinkleSpeed;
     const rad = p.rJitter;
