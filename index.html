@@ -80,8 +80,8 @@ for (let i = 0; i <= GUIDE_STEPS; i++) {
 // independent fast 3D tumble per ring (x/y/z axes) — this replaces the old flat 2D spin
 let rotA = { x: 0, y: 0, z: 0 };
 let rotB = { x: 0.9, y: 2.1, z: 1.4 }; // offset start so they don't overlap perfectly
-const SPEED_A = { x: 0.11, y: 0.15, z: 0.08 };
-const SPEED_B = { x: 0.15, y: 0.09, z: 0.13 };
+const SPEED_A = { x: 0.22, y: 0.30, z: 0.16 };
+const SPEED_B = { x: 0.30, y: 0.18, z: 0.26 };
 
 // ---------------- Size state ----------------
 const SMALL_PX = 16;   // tiny, sitting on the fingertip
@@ -206,9 +206,36 @@ function draw() {
   if (holding) {
     drawRingCrisp(particlesA, rotA);
     drawRingCrisp(particlesB, rotB);
+    drawNucleus();
   }
 
   requestAnimationFrame(draw);
+}
+
+function drawNucleus() {
+  const cx = ringPos.x * canvasElement.width, cy = ringPos.y * canvasElement.height;
+  const now = Date.now() * 0.001;
+  const pulse = 0.75 + 0.25 * Math.sin(now * 6);
+  const nucR = Math.max(3, currentSizePx * 0.16) * pulse;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, nucR * 3);
+  grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+  grad.addColorStop(0.35, 'rgba(200,225,255,0.5)');
+  grad.addColorStop(1, 'rgba(200,225,255,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, nucR * 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, nucR * 0.55, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
 }
 
 function project3D(x, y, z, rot, cx, cy, scale, focal) {
